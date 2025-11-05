@@ -1,0 +1,1221 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ビル王</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts (Inter) -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&family=Noto+Sans+JP:wght@400;700&display=swap" rel="stylesheet">
+    
+    <style>
+        /* 基本フォント設定 */
+        body {
+            font-family: 'Inter', 'Noto Sans JP', sans-serif;
+            /* 要求仕様：背景透過 */
+            background-color: transparent;
+            overflow: hidden; /* 紙吹雪のため */
+        }
+
+        /* スマホのセーフエリア（ノッチなど）を考慮 */
+        body {
+            padding-top: env(safe-area-inset-top);
+            padding-bottom: env(safe-area-inset-bottom);
+        }
+
+        /* ゲームボードのグリッドレイアウト (7x7) */
+        #board {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            grid-template-rows: repeat(7, 1fr);
+            gap: 2px; /* 狭くする */
+            width: 100%;
+            aspect-ratio: 1 / 1;
+            position: relative; /* 駒の配置基準 */
+        }
+
+        /* 各マス */
+        .cell {
+            border: 1px solid #6b7280; /* gray-500 */
+            border-radius: 4px; /* rounded */
+            padding: 2px; /* p-0.5 */
+            background-color: rgba(255, 255, 255, 0.8); /* 白の半透明 */
+            display: flex;
+            flex-direction: column;
+            /* ★変更：上揃えにして、増築ビジュアルとの衝突を避ける */
+            justify-content: flex-start;
+            align-items: center;
+            font-size: 0.65rem; /* text-xsより小さく */
+            line-height: 0.8rem;
+            position: relative; /* オーナー表示・ビル表示の基準 */
+            overflow: hidden;
+            text-align: center;
+        }
+        
+        /* マスのオーナー表示 */
+        .owner-badge {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 4px; /* 細くする */
+        }
+
+        /* ★変更：増築ビジュアル (積み上げ式) */
+        .building-level {
+            position: absolute;
+            bottom: 1px;
+            left: 0;
+            right: 0;
+            margin: auto;
+            display: flex;
+            flex-direction: column-reverse; /* 下から積み上げ */
+            align-items: center;
+        }
+        .building-level span {
+            /* ★変更：さらに小さくして重なりを回避 */
+            width: 8px; /* 四角に変更 */
+            height: 3px; /* 四角に変更 */
+            background-color: #d1d5db; /* gray-300 */
+            border: 1px solid #6b7280;
+            margin-top: 1px; /* 積み上げ時の隙間 */
+        }
+        /* 物件タイプごとの色分け */
+        .building-level span.built-building { background-color: #3b82f6; } /* ビル (青) */
+        .building-level span.built-commercial { background-color: #f59e0b; } /* 商業施設 (黄) */
+        .building-level span.built-shopping { background-color: #22c55e; } /* 商店街 (緑) */
+
+
+        /* ★変更：ボード中央 (UI集中エリア) */
+        .center-area {
+            grid-column: 2 / span 5;
+            grid-row: 2 / span 5;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-around; /* 中身を均等配置 */
+            padding: 4px;
+            background-color: rgba(255, 255, 255, 0.7);
+            border-radius: 8px;
+            overflow: hidden; /* メッセージログのため */
+        }
+        
+        /* ★追加：中央UI内のステータス */
+        .center-status-item {
+            border-radius: 6px;
+            padding: 2px 4px;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+        }
+        .center-status-item .money {
+            font-size: 0.9rem; /* 1.125rem -> 0.9rem */
+            font-weight: 700;
+        }
+        .center-status-item .name {
+            font-size: 0.7rem;
+            font-weight: 700;
+        }
+
+        /* ★追加：サイコロ表示エリア */
+        #dice-animation-area {
+            height: 60px; /* 60px */
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        #dice-display {
+            font-size: 3.75rem; /* 6xl */
+            color: #374151; /* gray-700 */
+        }
+
+
+        /* 特定のマスの配置 (7x7 = 24マス) */
+        #cell-0 { grid-column: 1; grid-row: 1; } /* スタート */
+        #cell-1 { grid-column: 2; grid-row: 1; }
+        #cell-2 { grid-column: 3; grid-row: 1; }
+        #cell-3 { grid-column: 4; grid-row: 1; }
+        #cell-4 { grid-column: 5; grid-row: 1; }
+        #cell-5 { grid-column: 6; grid-row: 1; }
+        #cell-6 { grid-column: 7; grid-row: 1; } /* イベント */
+        #cell-7 { grid-column: 7; grid-row: 2; }
+        #cell-8 { grid-column: 7; grid-row: 3; }
+        #cell-9 { grid-column: 7; grid-row: 4; }
+        #cell-10 { grid-column: 7; grid-row: 5; }
+        #cell-11 { grid-column: 7; grid-row: 6; }
+        #cell-12 { grid-column: 7; grid-row: 7; } /* イベント */
+        #cell-13 { grid-column: 6; grid-row: 7; }
+        #cell-14 { grid-column: 5; grid-row: 7; }
+        #cell-15 { grid-column: 4; grid-row: 7; }
+        #cell-16 { grid-column: 3; grid-row: 7; }
+        #cell-17 { grid-column: 2; grid-row: 7; }
+        #cell-18 { grid-column: 1; grid-row: 7; } /* イベント */
+        #cell-19 { grid-column: 1; grid-row: 6; }
+        #cell-20 { grid-column: 1; grid-row: 5; }
+        #cell-21 { grid-column: 1; grid-row: 4; }
+        #cell-22 { grid-column: 1; grid-row: 3; }
+        #cell-23 { grid-column: 1; grid-row: 2; }
+
+        /* プレイヤーの駒 */
+        .piece {
+            position: absolute;
+            width: 16px; /* 7x7用に小さく */
+            height: 16px; /* 7x7用に小さく */
+            border-radius: 9999px; /* rounded-full */
+            border: 2px solid white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            transition: all 0.5s ease-in-out;
+            z-index: 10;
+        }
+        
+        /* 駒の位置調整 (7x7用) */
+        #player-piece { background-color: #3b82f6; /* blue-500 */ transform: translate(10%, 10%); }
+        #cpu1-piece { background-color: #ef4444; /* red-500 */ transform: translate(60%, 10%); }
+        #cpu2-piece { background-color: #22c55e; /* green-500 */ transform: translate(10%, 60%); }
+        
+        /* ★変更：メッセージログ (中央UI内) */
+        #message-log {
+            height: 60px; /* 100px -> 60px */
+            overflow-y: auto; /* スクロール可能に */
+            background-color: rgba(243, 244, 246, 0.8); /* gray-100の半透明 */
+            border: 1px solid #d1d5db; /* gray-300 */
+            font-size: 0.75rem; /* text-xs */
+            padding: 2px;
+            border-radius: 6px;
+        }
+        
+        /* モーダル (ダイアログ) */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(0, 0, 0, 0.6);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 50;
+        }
+        .modal-content {
+            background-color: white;
+            padding: 24px; /* p-6 */
+            border-radius: 12px; /* rounded-xl */
+            box-shadow: 0 10px 15px rgba(0,0,0,0.1);
+            width: 90%;
+            max-width: 400px;
+        }
+
+        /* 破産アニメーション用 */
+        .bankrupt {
+            filter: grayscale(100%);
+            opacity: 0.5;
+        }
+
+        /* 勝利エフェクト (紙吹雪) */
+        #confetti-wrapper {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none; /* クリック透過 */
+            overflow: hidden;
+            z-index: 100;
+        }
+        .confetti {
+            position: absolute;
+            width: 10px;
+            height: 10px;
+            background-color: #f00;
+            opacity: 0.7;
+            animation: confetti-fall 3s linear infinite;
+        }
+        @keyframes confetti-fall {
+            0% {
+                transform: translateY(-100px) rotateZ(0deg);
+                opacity: 0.7;
+            }
+            100% {
+                transform: translateY(100vh) rotateZ(360deg);
+                opacity: 0;
+            }
+        }
+    </style>
+</head>
+<body class="bg-transparent text-gray-800">
+
+    <!-- 紙吹雪ラッパー -->
+    <div id="confetti-wrapper"></div>
+
+    <!-- タイトル画面 -->
+    <div id="title-screen" class="flex flex-col items-center justify-center min-h-screen p-4">
+        <h1 class="text-6xl font-bold text-center text-blue-600 drop-shadow-lg">ビル王</h1>
+        <p class="text-xl text-gray-700 mt-2">Billionaire King</p>
+        <div class="mt-12 space-y-4 w-full max-w-xs">
+            <button id="start-btn" class="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-4 px-6 rounded-lg text-lg shadow-lg transition duration-300 ease-in-out transform hover:scale-105">
+                ゲームスタート
+            </button>
+            <button id="load-btn" class="w-full bg-gray-500 hover:bg-gray-600 text-white font-bold py-4 px-6 rounded-lg text-lg shadow-lg transition duration-300 ease-in-out transform hover:scale-105">
+                つづきから
+            </button>
+        </div>
+    </div>
+
+    <!-- メインゲーム画面 -->
+    <!-- ★変更：status-area と control-area は board の center-area に移動 -->
+    <div id="game-screen" class="hidden min-h-screen max-w-md mx-auto flex flex-col p-2 space-y-2">
+        
+        <!-- 2. ボードエリア (UIを中央に集約) -->
+        <div class="flex-grow flex items-center justify-center">
+            <div id="board">
+                <!-- マス (7x7 = 24マス) -->
+                <div class="cell" id="cell-0"><span>スタート</span><span>+¥20k</span></div>
+                <div class="cell" id="cell-1"></div>
+                <div class="cell" id="cell-2"></div>
+                <div class="cell" id="cell-3"></div>
+                <div class="cell" id="cell-4"></div>
+                <div class="cell" id="cell-5"></div>
+                <div class="cell" id="cell-6"><span>イベント</span><span>?</span></div>
+                <div class="cell" id="cell-7"></div>
+                <div class="cell" id="cell-8"></div>
+                <div class="cell" id="cell-9"></div>
+                <div class="cell" id="cell-10"></div>
+                <div class="cell" id="cell-11"></div>
+                <div class="cell" id="cell-12"><span>イベント</span><span>?</span></div>
+                <div class="cell" id="cell-13"></div>
+                <div class="cell" id="cell-14"></div>
+                <div class="cell" id="cell-15"></div>
+                <div class="cell" id="cell-16"></div>
+                <div class="cell" id="cell-17"></div>
+                <div class="cell" id="cell-18"><span>イベント</span><span>?</span></div>
+                <div class="cell" id="cell-19"></div>
+                <div class="cell" id="cell-20"></div>
+                <div class="cell" id="cell-21"></div>
+                <div class="cell" id="cell-22"></div>
+                <div class="cell" id="cell-23"></div>
+                
+                <!-- ★変更：中央UIエリア -->
+                <div class="center-area">
+                    <!-- 1. ステータスエリア -->
+                    <div id="status-area" class="grid grid-cols-3 gap-1 text-center">
+                        <!-- プレイヤー -->
+                        <div id="status-player" class="center-status-item bg-blue-100 border-2 border-blue-400">
+                            <div class="name">あなた</div>
+                            <div id="money-player" class="money">¥100,000</div>
+                        </div>
+                        <!-- CPU 1 -->
+                        <div id="status-cpu1" class="center-status-item bg-red-100 border-2 border-red-400">
+                            <div class="name">CPU 1</div>
+                            <div id="money-cpu1" class="money">¥100,000</div>
+                        </div>
+                        <!-- CPU 2 -->
+                        <div id="status-cpu2" class="center-status-item bg-green-100 border-2 border-green-400">
+                            <div class="name">CPU 2</div>
+                            <div id="money-cpu2" class="money">¥100,000</div>
+                        </div>
+                    </div>
+
+                    <!-- ★追加：サイコロアニメーションエリア -->
+                    <div id="dice-animation-area">
+                        <div id="dice-display">🎲</div>
+                    </div>
+
+                    <!-- 3. コントロールエリア -->
+                    <div id="control-area" class="space-y-1">
+                        <!-- メッセージログ -->
+                        <div id="message-log" class="w-full">
+                            <p>ビル王へようこそ！</p>
+                        </div>
+                        <!-- 操作ボタン -->
+                        <div class="grid grid-cols-2 gap-2">
+                            <button id="roll-dice-btn" class="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-3 rounded-lg shadow-md transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed text-sm">
+                                サイコロを振る
+                            </button>
+                            <button id="save-btn" class="w-full bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-3 rounded-lg shadow-md transition duration-200 text-sm">
+                                セーブ
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 駒 -->
+                <div id="player-piece" class="piece"></div>
+                <div id="cpu1-piece" class="piece"></div>
+                <div id="cpu2-piece" class="piece"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- モーダル (ダイアログ) -->
+    <div id="modal-dialog" class="modal-overlay hidden">
+        <div class="modal-content">
+            <h3 id="modal-title" class="text-xl font-bold mb-4">タイトル</h3>
+            <p id="modal-message" class="mb-6">メッセージ本文</p>
+            <div id="modal-actions" class="flex justify-end space-x-3">
+                <!-- JavaScriptでボタンを動的に追加 -->
+            </div>
+        </div>
+    </div>
+
+
+    <!-- JavaScript -->
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+
+            // --- 1. DOM要素の取得 ---
+            const titleScreen = document.getElementById('title-screen');
+            const gameScreen = document.getElementById('game-screen');
+            const startBtn = document.getElementById('start-btn');
+            const loadBtn = document.getElementById('load-btn');
+            const saveBtn = document.getElementById('save-btn');
+            const rollDiceBtn = document.getElementById('roll-dice-btn');
+            const messageLog = document.getElementById('message-log');
+            
+            const modal = document.getElementById('modal-dialog');
+            const modalTitle = document.getElementById('modal-title');
+            const modalMessage = document.getElementById('modal-message');
+            const modalActions = document.getElementById('modal-actions');
+            
+            const pieceElements = {
+                player: document.getElementById('player-piece'),
+                cpu1: document.getElementById('cpu1-piece'),
+                cpu2: document.getElementById('cpu2-piece')
+            };
+
+            const moneyElements = {
+                player: document.getElementById('money-player'),
+                cpu1: document.getElementById('money-cpu1'),
+                cpu2: document.getElementById('money-cpu2')
+            };
+
+            const statusElements = {
+                player: document.getElementById('status-player'),
+                cpu1: document.getElementById('status-cpu1'),
+                cpu2: document.getElementById('status-cpu2')
+            };
+            
+            const confettiWrapper = document.getElementById('confetti-wrapper');
+            const diceDisplay = document.getElementById('dice-display'); // ★追加
+
+            // --- 2. ゲームデータの定義 ---
+            
+            // ボード定義 (24マス, 山手線駅名, 新物件タイプ)
+            const BOARD_DEFINITION = [
+                { id: 0, name: "スタート", type: "start" },
+                // 低ランク (ビル)
+                { id: 1, name: "有楽町", type: "property", propertyType: "building", price: 10000, rent: [2000, 5000, 12000], buildCost: [5000, 10000] },
+                { id: 2, name: "新橋", type: "property", propertyType: "building", price: 10000, rent: [2000, 5000, 12000], buildCost: [5000, 10000] },
+                { id: 3, name: "浜松町", type: "property", propertyType: "building", price: 12000, rent: [2200, 5500, 13000], buildCost: [6000, 11000] },
+                { id: 4, name: "田町", type: "property", propertyType: "building", price: 12000, rent: [2200, 5500, 13000], buildCost: [6000, 11000] },
+                { id: 5, name: "高輪", type: "property", propertyType: "building", price: 15000, rent: [2500, 6000, 15000], buildCost: [7000, 12000] },
+                { id: 6, name: "イベント", type: "event" },
+                // 中ランク (商店街)
+                { id: 7, name: "品川", type: "property", propertyType: "shopping", price: 20000, rent: [4000, 10000, 25000], buildCost: [10000, 20000] },
+                { id: 8, name: "大崎", type: "property", propertyType: "shopping", price: 20000, rent: [4000, 10000, 25000], buildCost: [10000, 20000] },
+                { id: 9, name: "五反田", type: "property", propertyType: "shopping", price: 22000, rent: [4500, 11000, 28000], buildCost: [11000, 22000] },
+                { id: 10, name: "目黒", type: "property", propertyType: "shopping", price: 22000, rent: [4500, 11000, 28000], buildCost: [11000, 22000] },
+                { id: 11, name: "恵比寿", type: "property", propertyType: "shopping", price: 25000, rent: [5000, 13000, 30000], buildCost: [12000, 25000] },
+                { id: 12, name: "イベント", type: "event" },
+                // 高ランク (商業施設)
+                { id: 13, name: "渋谷", type: "property", propertyType: "commercial", price: 35000, rent: [7000, 20000, 45000], buildCost: [20000, 35000] },
+                { id: 14, name: "原宿", type: "property", propertyType: "commercial", price: 35000, rent: [7000, 20000, 45000], buildCost: [20000, 35000] },
+                { id: 15, name: "新宿", type: "property", propertyType: "commercial", price: 40000, rent: [8000, 22000, 50000], buildCost: [25000, 40000] },
+                { id: 16, name: "池袋", type: "property", propertyType: "commercial", price: 40000, rent: [8000, 22000, 50000], buildCost: [25000, 40000] },
+                { id: 17, name: "大塚", type: "property", propertyType: "commercial", price: 38000, rent: [7500, 21000, 48000], buildCost: [22000, 38000] },
+                { id: 18, name: "イベント", type: "event" },
+                // 中ランク (商店街)
+                { id: 19, name: "巣鴨", type: "property", propertyType: "shopping", price: 28000, rent: [5500, 14000, 32000], buildCost: [14000, 28000] },
+                { id: 20, name: "駒込", type: "property", propertyType: "shopping", price: 28000, rent: [5500, 14000, 32000], buildCost: [14000, 28000] },
+                { id: 21, name: "田端", type: "property", propertyType: "shopping", price: 26000, rent: [5200, 13500, 31000], buildCost: [13000, 26000] },
+                // 高ランク (商業施設)
+                { id: 22, name: "上野", type: "property", propertyType: "commercial", price: 45000, rent: [9000, 25000, 60000], buildCost: [30000, 45000] },
+                { id: 23, name: "秋葉原", type: "property", propertyType: "commercial", price: 45000, rent: [9000, 25000, 60000], buildCost: [30000, 45000] }
+            ];
+            
+            // イベントカード
+            const EVENT_CARDS = [
+                // 良いイベント
+                { type: 'good', name: "建設ブーム", description: "他のプレイヤー全員から 5,000円 ずつ徴収する。", action: (player) => collectFromOthers(player, 5000) },
+                { type: 'good', name: "資産運用成功", description: "銀行から 20,000円 もらう。", action: (player) => updateMoney(player, 20000) },
+                { type: 'good', name: "ラッキーボーナス", description: "サイコロをもう1回振る。", action: (player) => extraTurn(player) },
+                { type: 'good', name: "スタートマスへワープ", description: "スタートマスへ移動し、給料 20,000円 をもらう。", action: (player) => moveTo(player, 0, true) },
+                { type: 'good', name: "無料増築", description: "自分が所有するビル（一番安いもの）を1段階、無料で増築する。", action: (player) => freeUpgrade(player) },
+                // 悪いイベント
+                { type: 'bad', name: "ビル火災", description: "自分が所有するビル（一番高いもの）が1段階ランクダウンする。", action: (player) => downgradeBuilding(player) },
+                { type: 'bad', name: "税務調査", description: "追徴課税として 15,000円 支払う。", action: (player) => updateMoney(player, -15000) },
+                { type: 'bad', name: "台風被害", description: "修繕費として 10,000円 支払う。", action: (player) => updateMoney(player, -10000) },
+                { type: 'bad', name: "景気後退", description: "次のターン、1回休み。", action: (player) => skipTurn(player) },
+                { type: 'bad', name: "CPUのマスへワープ", description: "一番遠くにあるCPU所有のビルマスへ強制移動し、通行料を支払う。", action: (player) => moveToEnemyProperty(player) }
+            ];
+
+            // ゲーム状態 (State)
+            let gameState = {};
+            let confettiInterval = null;
+
+            // --- 3. ゲーム初期化 ---
+
+            function initializeGame() {
+                // ボードの状態を初期化
+                const initialBoardState = BOARD_DEFINITION.map(cell => {
+                    const state = { ...cell }; // 定義をコピー
+                    if (state.type === 'property') {
+                        state.owner = null; // 'player', 'cpu1', 'cpu2'
+                        state.level = 0; // 0:未購入, 1:初期ビル, 2:中ビル, 3:大ビル
+                    }
+                    return state;
+                });
+
+                // プレイヤーの状態を初期化
+                const initialPlayers = [
+                    { id: 'player', name: 'あなた', money: 100000, position: 0, isBankrupt: false, skipNextTurn: false },
+                    { id: 'cpu1', name: 'CPU 1', money: 100000, position: 0, isBankrupt: false, skipNextTurn: false },
+                    { id: 'cpu2', name: 'CPU 2', money: 100000, position: 0, isBankrupt: false, skipNextTurn: false }
+                ];
+
+                gameState = {
+                    board: initialBoardState,
+                    players: initialPlayers,
+                    currentPlayerIndex: 0,
+                    gameInProgress: true,
+                    hasExtraTurn: false,
+                };
+
+                updateBoardUI();
+                updateAllPlayersUI();
+                updateAllPiecesPosition();
+                logMessage("ゲームを開始します。あなたのターンです。");
+                rollDiceBtn.disabled = false;
+                stopConfetti(); 
+            }
+            
+            // --- 4. UI更新関数 ---
+            
+            // メッセージログの追加
+            function logMessage(message) {
+                const p = document.createElement('p');
+                p.textContent = message;
+                messageLog.appendChild(p);
+                // 常に一番下にスクロール
+                messageLog.scrollTop = messageLog.scrollHeight;
+            }
+
+            // 全プレイヤーのステータスUIを更新
+            function updateAllPlayersUI() {
+                if (!gameState.players) return; // 初期化前
+                gameState.players.forEach(player => {
+                    moneyElements[player.id].textContent = `¥${player.money.toLocaleString()}`;
+                    if (player.isBankrupt && !statusElements[player.id].classList.contains('bankrupt')) {
+                        statusElements[player.id].classList.add('bankrupt');
+                        pieceElements[player.id].classList.add('hidden');
+                    } else if (!player.isBankrupt) {
+                        statusElements[player.id].classList.remove('bankrupt');
+                        pieceElements[player.id].classList.remove('hidden');
+                    }
+                });
+            }
+            
+            // ★変更：ボードのマス目UIを更新 (テキストラップ、重なり防止対応)
+            function updateBoardUI() {
+                if (!gameState.board) return; // 初期化前
+                gameState.board.forEach(cell => {
+                    const cellEl = document.getElementById(`cell-${cell.id}`);
+                    if (!cellEl) return;
+                    
+                    if (cell.type === 'property') {
+                        // オーナーバッジとビルレベル以外のテキストノードを削除
+                        const textNodes = Array.from(cellEl.childNodes).filter(node => 
+                            !node.classList || (!node.classList.contains('owner-badge') && !node.classList.contains('building-level'))
+                        );
+                        textNodes.forEach(node => cellEl.removeChild(node));
+
+                        // 1. オーナー表示 (Get or Create)
+                        let ownerBadge = cellEl.querySelector('.owner-badge');
+                        if (!ownerBadge) {
+                            ownerBadge = document.createElement('div');
+                            ownerBadge.className = 'owner-badge';
+                            cellEl.appendChild(ownerBadge);
+                        }
+                        
+                        if (cell.owner === 'player') ownerBadge.style.backgroundColor = '#3b82f6'; // blue-500
+                        else if (cell.owner === 'cpu1') ownerBadge.style.backgroundColor = '#ef4444'; // red-500
+                        else if (cell.owner === 'cpu2') ownerBadge.style.backgroundColor = '#22c55e'; // green-500
+                        else ownerBadge.style.backgroundColor = 'transparent';
+
+                        // 2. マス情報 (テキストラッパー)
+                        const textWrapper = document.createElement('div');
+                        
+                        let propertyTypeText = '';
+                        if (cell.propertyType === 'building') propertyTypeText = '[ビル]';
+                        else if (cell.propertyType === 'commercial') propertyTypeText = '[商業]';
+                        else if (cell.propertyType === 'shopping') propertyTypeText = '[商店]';
+                        
+                        textWrapper.innerHTML += `<span class="block text-center">${cell.name}</span>`;
+                        textWrapper.innerHTML += `<span class="block text-center text-xs">${propertyTypeText}</span>`;
+
+                        const priceText = cell.level === 0 ? `¥${(cell.price / 1000).toFixed(0)}k` : `R:¥${(cell.rent[cell.level - 1] / 1000).toFixed(0)}k`;
+                        textWrapper.innerHTML += `<span class="block text-center font-bold">${priceText}</span>`;
+                        
+                        cellEl.appendChild(textWrapper); // テキストラッパーを追加
+
+                        // 3. ビルレベル (Get or Create)
+                        let levelDiv = cellEl.querySelector('.building-level');
+                        if (!levelDiv) {
+                            levelDiv = document.createElement('div');
+                            levelDiv.className = 'building-level';
+                            cellEl.appendChild(levelDiv); // 一度だけ追加
+                        }
+                        levelDiv.innerHTML = ''; // 中身をリセット
+                        
+                        for (let i = 0; i < cell.level; i++) {
+                            const block = document.createElement('span');
+                            if (cell.propertyType === 'building') block.className = 'built-building';
+                            else if (cell.propertyType === 'commercial') block.className = 'built-commercial';
+                            else if (cell.propertyType === 'shopping') block.className = 'built-shopping';
+                            levelDiv.appendChild(block);
+                        }
+                    }
+                });
+            }
+
+            // 全ての駒の位置を更新
+            function updateAllPiecesPosition() {
+                if (gameState.players && gameState.players.length > 0) {
+                    gameState.players.forEach(player => {
+                        movePiece(player.id, player.position);
+                    });
+                } else {
+                    // gameStateが初期化される前
+                    movePiece('player', 0);
+                    movePiece('cpu1', 0);
+                    movePiece('cpu2', 0);
+                }
+            }
+
+            // 特定の駒を指定のマスに移動
+            function movePiece(playerId, cellId) {
+                const piece = pieceElements[playerId];
+                const cell = document.getElementById(`cell-${cellId}`);
+                if (!piece || !cell) return;
+                
+                const boardEl = document.getElementById('board');
+                const boardRect = boardEl.getBoundingClientRect();
+                const cellRect = cell.getBoundingClientRect();
+
+                if (!boardRect || !cellRect) {
+                    console.error("Board or cell element not found for piece movement.");
+                    return;
+                }
+
+                const x = cellRect.left - boardRect.left;
+                const y = cellRect.top - boardRect.top;
+                
+                piece.style.left = `${x}px`;
+                piece.style.top = `${y}px`;
+            }
+
+            // --- 5. ゲームロジック (コア) ---
+
+            // タイトル画面の処理
+            startBtn.addEventListener('click', () => {
+                titleScreen.classList.add('hidden');
+                gameScreen.classList.remove('hidden');
+                initializeGame();
+            });
+
+            loadBtn.addEventListener('click', () => {
+                if (loadGame()) {
+                    titleScreen.classList.add('hidden');
+                    gameScreen.classList.remove('hidden');
+                    logMessage("セーブデータをロードしました。");
+                } else {
+                    showModal("ロード失敗", "セーブデータが見つかりません。", [{ text: "OK", value: true, class: "bg-red-500" }]);
+                }
+            });
+
+            saveBtn.addEventListener('click', saveGame);
+
+            // サイコロボタンの処理
+            rollDiceBtn.addEventListener('click', () => {
+                const currentPlayer = gameState.players[gameState.currentPlayerIndex];
+                if (currentPlayer.id === 'player' && !rollDiceBtn.disabled) {
+                    rollDiceBtn.disabled = true; // アニメーション中も押せないように
+                    playTurn(currentPlayer);
+                }
+            });
+
+            // ★追加：サイコロアニメーション
+            async function animateDiceRoll() {
+                rollDiceBtn.disabled = true;
+                const pips = ['⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
+                
+                // アニメーション
+                let cycles = 0;
+                await new Promise(resolve => {
+                    const rollInterval = setInterval(() => {
+                        diceDisplay.textContent = pips[Math.floor(Math.random() * 6)];
+                        cycles++;
+                        if (cycles > 10) { // 約1秒
+                            clearInterval(rollInterval);
+                            resolve();
+                        }
+                    }, 100);
+                });
+                
+                // 最終結果
+                const roll = Math.floor(Math.random() * 6) + 1;
+                diceDisplay.textContent = pips[roll - 1];
+                
+                return roll;
+            }
+
+            // ターン処理 (メインループ)
+            async function playTurn(player) {
+                if (player.isBankrupt) {
+                    logMessage(`${player.name} は破産しているため、ターンをスキップします。`);
+                    endTurn();
+                    return;
+                }
+                
+                if (player.skipNextTurn) {
+                    player.skipNextTurn = false;
+                    logMessage(`${player.name} は景気後退の影響で1回休みです。`);
+                    endTurn();
+                    return;
+                }
+
+                gameState.hasExtraTurn = false;
+
+                // 1. ★変更：サイコロを振る (アニメーション)
+                logMessage(`${player.name} はサイコロを振った！`);
+                const roll = await animateDiceRoll();
+                logMessage(`${roll} が出た。`);
+
+
+                // 2. 駒を移動
+                const oldPosition = player.position;
+                const newPosition = (oldPosition + roll) % 24; 
+                player.position = newPosition;
+
+                await animateMove(player.id, oldPosition, newPosition, roll);
+
+                // 3. スタートマス通過チェック
+                if (newPosition < oldPosition) { // 周回した場合
+                    logMessage(`${player.name} はスタートマスを通過！ 給料 ¥20,000 を獲得。`);
+                    updateMoney(player, 20000);
+                }
+
+                // 4. 停止マスの処理
+                const currentCell = gameState.board[newPosition];
+                await handleCellAction(player, currentCell);
+                
+                // 5. ターン終了処理
+                if (checkGameOver()) return;
+                
+                if (!gameState.hasExtraTurn) {
+                    endTurn();
+                } else {
+                    // ラッキーボーナスなどで追加ターン
+                    logMessage(`${player.name} はもう一度ターンを行います！`);
+                    if (player.id === 'player') {
+                        rollDiceBtn.disabled = false;
+                    } else {
+                        setTimeout(() => playTurn(player), 1000);
+                    }
+                }
+            }
+            
+            // 駒の移動アニメーション (簡易)
+            function animateMove(playerId, start, end, steps) {
+                return new Promise(resolve => {
+                    let current = start;
+                    const piece = pieceElements[playerId];
+                    
+                    const moveInterval = setInterval(() => {
+                        current = (current + 1) % 24;
+                        movePiece(playerId, current);
+                        
+                        if (current === end) {
+                            clearInterval(moveInterval);
+                            resolve();
+                        }
+                    }, 300); // 1マス0.3秒
+                });
+            }
+
+            // ターン終了
+            function endTurn() {
+                if (!gameState.gameInProgress) return; // ゲームオーバー時
+
+                let nextIndex = (gameState.currentPlayerIndex + 1) % gameState.players.length;
+                
+                // 破産したプレイヤーはスキップ
+                while (gameState.players[nextIndex].isBankrupt) {
+                    nextIndex = (nextIndex + 1) % gameState.players.length;
+                }
+                
+                gameState.currentPlayerIndex = nextIndex;
+                const nextPlayer = gameState.players[nextIndex];
+                
+                logMessage(`--- ${nextPlayer.name} のターン ---`);
+
+                if (nextPlayer.id === 'player') {
+                    rollDiceBtn.disabled = false;
+                } else {
+                    rollDiceBtn.disabled = true;
+                    // CPUのターンを自動実行
+                    setTimeout(() => playTurn(nextPlayer), 1500); // 1.5秒待機
+                }
+            }
+            
+            // 停止マスの処理
+            async function handleCellAction(player, cell) {
+                logMessage(`${player.name} は 「${cell.name}」 に止まった。`);
+                
+                switch(cell.type) {
+                    case 'start':
+                        logMessage("スタートマスに止まった。");
+                        break;
+                    case 'property':
+                        await handlePropertyCell(player, cell);
+                        break;
+                    case 'event':
+                        await handleEventCell(player);
+                        break;
+                }
+            }
+
+            // ビルマスの処理
+            async function handlePropertyCell(player, cell) {
+                // cell は gameState.board の参照
+                
+                if (cell.owner === null) {
+                    // 1. 空き物件
+                    if (player.money >= cell.price) {
+                        if (player.id === 'player') {
+                            // プレイヤー: 購入確認
+                            const buy = await showModal(
+                                "物件購入",
+                                `${cell.name} (¥${cell.price.toLocaleString()}) を購入しますか？ (所持金: ¥${player.money.toLocaleString()})`,
+                                [{ text: "購入する", value: true, class: "bg-blue-500" }, { text: "やめる", value: false, class: "bg-gray-500" }]
+                            );
+                            if (buy) {
+                                buyProperty(player, cell);
+                            }
+                        } else {
+                            // CPU: AIで購入判断
+                            if (cpuShouldBuy(player, cell)) {
+                                logMessage(`${player.name} は ¥${cell.price.toLocaleString()} で ${cell.name} を購入した。`);
+                                buyProperty(player, cell);
+                            } else {
+                                logMessage(`${player.name} は ${cell.name} の購入を見送った。`);
+                            }
+                        }
+                    } else {
+                        logMessage(`${player.name} は所持金が足りず、 ${cell.name} を購入できない。`);
+                    }
+                    
+                } else if (cell.owner === player.id) {
+                    // 2. 自分の物件 (増築)
+                    if (cell.level > 0 && cell.level < cell.rent.length) {
+                        const buildCost = cell.buildCost[cell.level - 1];
+                        if (player.money >= buildCost) {
+                             if (player.id === 'player') {
+                                const upgrade = await showModal(
+                                    "物件増築",
+                                    `${cell.name} を増築しますか？ (費用: ¥${buildCost.toLocaleString()}) (現在Lv${cell.level} → Lv${cell.level + 1})`,
+                                    [{ text: "増築する", value: true, class: "bg-blue-500" }, { text: "やめる", value: false, class: "bg-gray-500" }]
+                                );
+                                if (upgrade) {
+                                    upgradeProperty(player, cell);
+                                }
+                             } else {
+                                // CPU: AIで増築判断
+                                if (cpuShouldUpgrade(player, cell)) {
+                                    logMessage(`${player.name} は ¥${buildCost.toLocaleString()} で ${cell.name} を増築した。`);
+                                    upgradeProperty(player, cell);
+                                }
+                             }
+                        }
+                    } else if (cell.level === cell.rent.length) {
+                        logMessage(`${cell.name} はすでに最大の物件です。`);
+                    }
+
+                } else {
+                    // 3. 他人の物件 (通行料支払い)
+                    const owner = gameState.players.find(p => p.id === cell.owner);
+                    if (owner && !owner.isBankrupt) {
+                        const rent = cell.rent[cell.level - 1]; // levelは1, 2, 3
+                        logMessage(`${player.name} は ${owner.name} に通行料 ¥${rent.toLocaleString()} を支払う。`);
+                        
+                        updateMoney(player, -rent);
+                        if (gameState.gameInProgress) { // 支払いで破産しなかった場合
+                            updateMoney(owner, rent);
+                        }
+                    }
+                }
+            }
+            
+            // イベントマスの処理
+            async function handleEventCell(player) {
+                const card = EVENT_CARDS[Math.floor(Math.random() * EVENT_CARDS.length)];
+                
+                logMessage(`イベント発生！ 【${card.name}】`);
+                
+                if (player.id === 'player') {
+                     await showModal(
+                        `イベント: ${card.name}`,
+                        card.description,
+                        [{ text: "OK", value: true, class: "bg-blue-500" }]
+                    );
+                } else {
+                    // CPUの場合はダイアログを待たずに即時実行
+                    await new Promise(r => setTimeout(r, 1000)); // 1秒ウェイト
+                }
+                
+                // イベントアクションの実行
+                card.action(player);
+            }
+
+
+            // --- 6. アクション関数 (ビル・金) ---
+            
+            function buyProperty(player, cell) {
+                player.money -= cell.price;
+                cell.owner = player.id;
+                cell.level = 1; // 初期ビル
+                logMessage(`${player.name} が ${cell.name} を購入！ (Lv1)`);
+                updateBoardUI();
+                updateAllPlayersUI();
+            }
+
+            function upgradeProperty(player, cell) {
+                const cost = cell.buildCost[cell.level - 1];
+                player.money -= cost;
+                cell.level += 1;
+                logMessage(`${player.name} が ${cell.name} を増築！ (Lv${cell.level})`);
+                updateBoardUI();
+                updateAllPlayersUI();
+            }
+
+            // お金の増減と破産チェック
+            function updateMoney(player, amount) {
+                player.money += amount;
+                
+                if (amount > 0) {
+                    logMessage(`${player.name} は ¥${amount.toLocaleString()} を手に入れた。 (所持金: ¥${player.money.toLocaleString()})`);
+                } else if (amount < 0) {
+                    logMessage(`${player.name} は ¥${(-amount).toLocaleString()} を支払った。 (所持金: ¥${player.money.toLocaleString()})`);
+                }
+
+                if (player.money < 0) {
+                    handleBankruptcy(player);
+                }
+                
+                if (gameState.gameInProgress) {
+                    updateAllPlayersUI();
+                }
+            }
+            
+            // 破産処理
+            function handleBankruptcy(player) {
+                logMessage(`！！！ ${player.name} は破産した ！！！`);
+                player.isBankrupt = true;
+                player.money = 0;
+                
+                // 破産者の物件をすべて解放
+                gameState.board.forEach(cell => {
+                    if (cell.owner === player.id) {
+                        cell.owner = null;
+                        cell.level = 0;
+                    }
+                });
+                
+                updateBoardUI();
+                updateAllPlayersUI(); // 破産表示を反映
+                checkGameOver();
+            }
+            
+            // ゲームオーバーチェック
+            function checkGameOver() {
+                if (!gameState.players) return false; // 初期化前
+                const activePlayers = gameState.players.filter(p => !p.isBankrupt);
+                
+                if (activePlayers.length === 1) {
+                    const winner = activePlayers[0];
+                    logMessage(`ゲーム終了！ ${winner.name} の勝利です！`);
+                    
+                    gameState.gameInProgress = false;
+                    rollDiceBtn.disabled = true;
+                    
+                    startConfetti(); // 勝利エフェクト開始
+
+                    showModal(
+                        "ゲーム終了！",
+                        `${winner.name} の勝利です！`,
+                        [{ text: "タイトルへ", value: "title", class: "bg-blue-500" }]
+                    ).then(() => {
+                        // タイトルへ戻る
+                        gameScreen.classList.add('hidden');
+                        titleScreen.classList.remove('hidden');
+                        stopConfetti(); // エフェクト停止
+                    });
+                    
+                    return true;
+                    
+                } else if (gameState.players[0].isBankrupt) {
+                    logMessage("ゲームオーバー... あなたは破産しました。");
+
+                    gameState.gameInProgress = false;
+                    rollDiceBtn.disabled = true;
+
+                    showModal(
+                        "ゲームオーバー",
+                        "あなたは破産しました...",
+                        [{ text: "タイトルへ", value: "title", class: "bg-blue-500" }]
+                    ).then(() => {
+                        // タイトルへ戻る
+                        gameScreen.classList.add('hidden');
+                        titleScreen.classList.remove('hidden');
+                    });
+                    
+                    return true;
+                }
+                return false;
+            }
+
+
+            // --- 7. CPU AIロジック ---
+            
+            function cpuShouldBuy(cpu, cell) {
+                // 所持金が (価格 * 2) 以上なら購入
+                return cpu.money >= (cell.price * 2);
+            }
+            
+            function cpuShouldUpgrade(cpu, cell) {
+                const cost = cell.buildCost[cell.level - 1];
+                // 所持金が (増築費 * 3) 以上なら増築
+                return cpu.money >= (cost * 3);
+            }
+
+            // --- 8. イベントカード アクション ---
+            
+            function collectFromOthers(player, amount) {
+                gameState.players.forEach(p => {
+                    if (p.id !== player.id && !p.isBankrupt) {
+                        updateMoney(p, -amount);
+                        if (gameState.gameInProgress) { // 相手が破産しなかった場合
+                            updateMoney(player, amount);
+                        }
+                    }
+                });
+            }
+            
+            function extraTurn(player) {
+                gameState.hasExtraTurn = true;
+            }
+
+            function moveTo(player, cellId, getSalary) {
+                player.position = cellId;
+                movePiece(player.id, cellId); // アニメーションなしで即時移動
+                if (getSalary) {
+                    updateMoney(player, 20000);
+                }
+            }
+            
+            function freeUpgrade(player) {
+                // 自分が所有する一番安いビルを探す
+                let cheapestProperty = null;
+                let minLevel = 4; // 最大レベル+1
+                
+                gameState.board.forEach(cell => {
+                    if (cell.owner === player.id && cell.level > 0 && cell.level < cell.rent.length) { // 増築可能
+                        if (cell.level < minLevel) {
+                            minLevel = cell.level;
+                            cheapestProperty = cell;
+                        } else if (cell.level === minLevel) {
+                            // 同じレベルなら価格が安い方
+                            if (!cheapestProperty || cell.price < cheapestProperty.price) {
+                                cheapestProperty = cell;
+                            }
+                        }
+                    }
+                });
+                
+                if (cheapestProperty) {
+                    cheapestProperty.level += 1;
+                    logMessage(`${player.name} は ${cheapestProperty.name} を無料で増築！ (Lv${cheapestProperty.level})`);
+                    updateBoardUI();
+                } else {
+                    logMessage(`${player.name} は増築できる物件を持っていなかった。`);
+                }
+            }
+
+            function downgradeBuilding(player) {
+                 // 自分が所有する一番高いビルを探す
+                let priciestProperty = null;
+                let maxLevel = 0;
+                
+                gameState.board.forEach(cell => {
+                    if (cell.owner === player.id && cell.level > 0) { // ビルを持っている
+                        if (cell.level > maxLevel) {
+                            maxLevel = cell.level;
+                            priciestProperty = cell;
+                        } else if (cell.level === maxLevel) {
+                            if (!priciestProperty || cell.price > priciestProperty.price) {
+                                priciestProperty = cell;
+                            }
+                        }
+                    }
+                });
+                
+                if (priciestProperty) {
+                    priciestProperty.level -= 1;
+                    const status = priciestProperty.level === 0 ? "空き物件になった" : `Lv${priciestProperty.level} にランクダウンした`;
+                    if(priciestProperty.level === 0) {
+                        priciestProperty.owner = null; // オーナーも失う
+                    }
+                    logMessage(`${player.name} の ${priciestProperty.name} が火事に！ ${status}`);
+                    updateBoardUI();
+                } else {
+                    logMessage(`${player.name} は物件を持っていなかった。`);
+                }
+            }
+            
+            function skipTurn(player) {
+                player.skipNextTurn = true;
+            }
+
+            function moveToEnemyProperty(player) {
+                let targetCell = null;
+                let maxDistance = -1;
+                
+                const otherPlayerIds = gameState.players
+                    .filter(p => p.id !== player.id && !p.isBankrupt)
+                    .map(p => p.id);
+
+                if (otherPlayerIds.length === 0) {
+                    logMessage("移動対象のCPUがいなかった。");
+                    return;
+                }
+
+                gameState.board.forEach((cell, index) => {
+                    if (cell.type === 'property' && otherPlayerIds.includes(cell.owner)) {
+                        let distance = (index - player.position + 24) % 24; // 順方向の距離
+                        if (distance > maxDistance) {
+                            maxDistance = distance;
+                            targetCell = cell;
+                        }
+                    }
+                });
+                
+                if (targetCell) {
+                    logMessage(`${player.name} は ${targetCell.name} へ強制移動！`);
+                    player.position = targetCell.id;
+                    movePiece(player.id, targetCell.id);
+                    // マスのアクションを再実行 (通行料支払い)
+                    handlePropertyCell(player, targetCell);
+                } else {
+                    logMessage("移動対象のCPUの物件がなかった。");
+                }
+            }
+
+            // --- 9. モーダル (ダイアログ) ---
+            
+            function showModal(title, message, buttons) {
+                return new Promise(resolve => {
+                    modalTitle.textContent = title;
+                    modalMessage.textContent = message;
+                    modalActions.innerHTML = ''; // ボタンをクリア
+                    
+                    buttons.forEach(btnInfo => {
+                        const button = document.createElement('button');
+                        button.textContent = btnInfo.text;
+                        button.className = `py-2 px-4 rounded-lg text-white font-bold ${btnInfo.class || 'bg-blue-500'}`;
+                        button.onclick = () => {
+                            modal.classList.add('hidden');
+                            resolve(btnInfo.value); // ボタンに設定された値を返す
+                        };
+                        modalActions.appendChild(button);
+                    });
+                    
+                    modal.classList.remove('hidden');
+                });
+            }
+
+            // --- 10. 保存・読み込み (localStorage) ---
+            const SAVE_KEY = 'biru-oh_savedata';
+
+            function saveGame() {
+                try {
+                    localStorage.setItem(SAVE_KEY, JSON.stringify(gameState));
+                    logMessage("ゲームをセーブしました。");
+                    showModal("セーブ完了", "ゲームデータをブラウザに保存しました。", [{ text: "OK", value: true, class: "bg-blue-500" }]);
+                } catch (e) {
+                    console.error("Save failed: ", e);
+                    showModal("セーブ失敗", "データの保存に失敗しました。", [{ text: "OK", value: true, class: "bg-red-500" }]);
+                }
+            }
+
+            function loadGame() {
+                const savedData = localStorage.getItem(SAVE_KEY);
+                if (savedData) {
+                    try {
+                        gameState = JSON.parse(savedData);
+                        // UI全体を復元
+                        updateBoardUI();
+                        updateAllPlayersUI();
+                        updateAllPiecesPosition();
+                        
+                        // 現在のプレイヤーに応じてボタンを制御
+                        const currentPlayer = gameState.players[gameState.currentPlayerIndex];
+                        rollDiceBtn.disabled = !gameState.gameInProgress || (currentPlayer.id !== 'player');
+                        
+                        return true;
+                    } catch (e) {
+                        console.error("Load failed: ", e);
+                        return false;
+                    }
+                }
+                return false;
+            }
+
+            // --- 11. 勝利エフェクト ---
+            
+            function startConfetti() {
+                stopConfetti(); // 既存のがあれば止める
+                const colors = ['#f00', '#0f0', '#00f', '#ff0', '#0ff', '#f0f'];
+                confettiInterval = setInterval(() => {
+                    if (confettiWrapper.childElementCount > 100) return; // 増えすぎ防止
+
+                    const confetti = document.createElement('div');
+                    confetti.className = 'confetti';
+                    confetti.style.left = `${Math.random() * 100}vw`;
+                    confetti.style.backgroundColor = colors[Math.floor(Math.random() * colors.length)];
+                    confetti.style.width = `${Math.random() * 10 + 5}px`;
+                    confetti.style.height = `${Math.random() * 10 + 5}px`;
+                    confetti.style.animationDuration = `${Math.random() * 2 + 3}s`; // 3〜5秒
+                    confetti.style.opacity = `${Math.random() * 0.5 + 0.5}`; // 0.5〜1.0
+
+                    // 画面端に行ったら消す
+                    confetti.addEventListener('animationend', () => {
+                        confetti.remove();
+                    });
+                    
+                    confettiWrapper.appendChild(confetti);
+                }, 100); // 0.1秒ごとに生成
+            }
+            
+            function stopConfetti() {
+                if (confettiInterval) {
+                    clearInterval(confettiInterval);
+                }
+                confettiWrapper.innerHTML = ''; // 残骸をすべて消す
+            }
+
+
+            // --- 起動時 ---
+            updateAllPiecesPosition();
+
+        });
+    </script>
+</body>
+</html>
